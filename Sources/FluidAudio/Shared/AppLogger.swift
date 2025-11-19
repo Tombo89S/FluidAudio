@@ -102,9 +102,23 @@ actor LogConsole {
     func write(level: AppLogger.Level, category: String, message: String) {
         let timestamp = dateFormatter.string(from: Date())
         let line = "[\(timestamp)] [\(label(for: level))] [FluidAudio.\(category)] \(message)\n"
+
+        // SAFE: Use print on iOS to avoid FileHandle crashes on real devices
+        // FileHandle.standardError.write() can throw NSFileHandleOperationException
+        // on iOS when stderr is not properly connected (common on real devices)
+        #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+        print(line, terminator: "")
+        #else
+        // macOS can safely use FileHandle with error handling
         if let data = line.data(using: .utf8) {
-            FileHandle.standardError.write(data)
+            do {
+                try FileHandle.standardError.write(contentsOf: data)
+            } catch {
+                // Fallback to print if FileHandle fails
+                print(line, terminator: "")
+            }
         }
+        #endif
     }
 
     private func label(for level: AppLogger.Level) -> String {

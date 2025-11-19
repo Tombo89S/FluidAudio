@@ -567,9 +567,18 @@ extension OfflineSegmentationProcessor {
     }
 
     fileprivate static func emitProfileLog(_ message: String) {
+        // SAFE: Use print on iOS to avoid FileHandle crashes on real devices
+        #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+        print("[Profiling] \(message)")
+        #else
         let line = "[Profiling] \(message)\n"
         if let data = line.data(using: .utf8) {
-            FileHandle.standardError.write(data)
+            do {
+                try FileHandle.standardError.write(contentsOf: data)
+            } catch {
+                print("[Profiling] \(message)")
+            }
         }
+        #endif
     }
 }
