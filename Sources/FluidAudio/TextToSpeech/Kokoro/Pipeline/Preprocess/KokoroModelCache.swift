@@ -13,11 +13,15 @@ public actor KokoroModelCache {
     public init() {}
 
     public func loadModelsIfNeeded(variants: Set<ModelNames.TTS.Variant>? = nil) async throws {
+        let explicitRequest = variants != nil
         let targetVariants: Set<ModelNames.TTS.Variant> = {
             if let variants = variants, !variants.isEmpty {
                 return variants
             }
-            return Set(ModelNames.TTS.Variant.allCases)
+            // When no explicit variants requested, only use already-downloaded models
+            // Don't attempt to download all variants - this prevents auto-downloading
+            // missing models during synthesis
+            return Set(downloadedModels.keys)
         }()
 
         let missingVariants = targetVariants.filter { kokoroModels[$0] == nil }
@@ -26,6 +30,12 @@ public actor KokoroModelCache {
         let variantsNeedingDownload = missingVariants.filter { downloadedModels[$0] == nil }
 
         if !variantsNeedingDownload.isEmpty {
+            // Only attempt download if variants were explicitly requested
+            // This prevents auto-downloading during synthesis when preference=nil
+            guard explicitRequest else {
+                let available = downloadedModels.keys.map { variantDescription($0) }.sorted().joined(separator: ", ")
+                throw TTSError.modelNotFound("Requested variant not loaded. Available: [\(available)]. Requested: \(variantsNeedingDownload.map { variantDescription($0) }.joined(separator: ", "))")
+            }
             let newlyDownloaded = try await TtsModels.download(variants: Set(variantsNeedingDownload))
             for (variant, model) in newlyDownloaded.modelsByVariant {
                 downloadedModels[variant] = model
