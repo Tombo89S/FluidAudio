@@ -66,7 +66,10 @@ public actor KokoroModelCache {
         if let cached = tokenLengthCache[variant] {
             return cached
         }
-        let model = try await model(for: variant)
+        // Check if model is already loaded before trying to load it
+        guard let model = kokoroModels[variant] else {
+            throw TTSError.modelNotFound("Model \(variantDescription(variant)) not loaded. Available: \(kokoroModels.keys.map { variantDescription($0) }.joined(separator: ", "))")
+        }
         let length = KokoroSynthesizer.inferTokenLength(from: model)
         tokenLengthCache[variant] = length
         return length

@@ -183,18 +183,31 @@ public struct KokoroSynthesizer {
             // Check which models are actually loaded
             let cache = try currentModelCache()
             let loadedVariants = await cache.getLoadedVariants()
+            let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroSynthesizer")
+
+            guard !loadedVariants.isEmpty else {
+                throw TTSError.modelNotFound("No Kokoro models loaded. Call TtsModels.download() first.")
+            }
 
             if loadedVariants.count == 1 {
                 // Single-model mode: only one variant loaded
                 // Use its capacity for both short and long to avoid trying to load other models
                 let variant = loadedVariants.first!
                 let capacity = try await tokenLength(for: variant)
-                let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroSynthesizer")
                 logger.info("Single-model mode detected: using \(variantDescription(variant)) for all synthesis")
                 return TokenCapacities(short: capacity, long: capacity)
             }
 
             // Multi-model mode: use default 5s/15s split
+            // Only attempt if both models are actually loaded
+            guard loadedVariants.contains(.fiveSecond) && loadedVariants.contains(.fifteenSecond) else {
+                // Partial multi-model setup - use whatever is available
+                logger.warning("Multi-model routing requested but not all models loaded: \(loadedVariants.map { variantDescription($0) }.joined(separator: ", ")). Using first available model for all chunks.")
+                let variant = loadedVariants.sorted(by: { $0.maxDurationSeconds < $1.maxDurationSeconds }).first!
+                let capacity = try await tokenLength(for: variant)
+                return TokenCapacities(short: capacity, long: capacity)
+            }
+
             async let short = tokenLength(for: .fiveSecond)
             async let long = tokenLength(for: .fifteenSecond)
             return try await TokenCapacities(short: short, long: long)
