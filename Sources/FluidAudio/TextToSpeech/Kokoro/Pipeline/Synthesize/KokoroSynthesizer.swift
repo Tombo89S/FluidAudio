@@ -242,6 +242,8 @@ public struct KokoroSynthesizer {
         let shortCapacity = capacities.short
         let longCapacity = capacities.long
 
+        logger.info("selectVariant() called: tokenCount=\(tokenCount), short=\(shortCapacity), long=\(longCapacity)")
+
         if shortCapacity == longCapacity {
             // Only one model loaded - use it for all chunks
             guard tokenCount <= shortCapacity else {
