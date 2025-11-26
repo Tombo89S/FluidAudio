@@ -180,6 +180,21 @@ public struct KokoroSynthesizer {
             let long = try await tokenLength(for: .fifteenSecond)
             return TokenCapacities(short: long, long: long)
         case nil:
+            // Check which models are actually loaded
+            let cache = try currentModelCache()
+            let loadedVariants = await cache.getLoadedVariants()
+
+            if loadedVariants.count == 1 {
+                // Single-model mode: only one variant loaded
+                // Use its capacity for both short and long to avoid trying to load other models
+                let variant = loadedVariants.first!
+                let capacity = try await tokenLength(for: variant)
+                let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroSynthesizer")
+                logger.info("Single-model mode detected: using \(variantDescription(variant)) for all synthesis")
+                return TokenCapacities(short: capacity, long: capacity)
+            }
+
+            // Multi-model mode: use default 5s/15s split
             async let short = tokenLength(for: .fiveSecond)
             async let long = tokenLength(for: .fifteenSecond)
             return try await TokenCapacities(short: short, long: long)

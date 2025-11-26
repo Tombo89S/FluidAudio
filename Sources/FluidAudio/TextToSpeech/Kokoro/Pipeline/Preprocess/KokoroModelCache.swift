@@ -115,6 +115,10 @@ public actor KokoroModelCache {
         }
     }
 
+    public func getLoadedVariants() -> [ModelNames.TTS.Variant] {
+        return Array(kokoroModels.keys)
+    }
+
     private func variantDescription(_ variant: ModelNames.TTS.Variant) -> String {
         switch variant {
         case .fiveSecond:
