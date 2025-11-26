@@ -84,7 +84,7 @@ public struct KokoroSynthesizer {
         vocabulary: [String: Int32],
         preference: ModelNames.TTS.Variant?,
         capacities: TokenCapacities
-    ) throws -> [ChunkEntry] {
+    ) async throws -> [ChunkEntry] {
         var entries: [ChunkEntry] = []
         entries.reserveCapacity(chunks.count)
 
@@ -95,7 +95,7 @@ public struct KokoroSynthesizer {
                 throw TTSError.processingFailed(
                     "No input IDs generated for chunk: \(joinedWords)")
             }
-            let variant = try selectVariant(
+            let variant = try await selectVariant(
                 forTokenCount: inputIds.count,
                 preference: preference,
                 capacities: capacities
@@ -226,7 +226,7 @@ public struct KokoroSynthesizer {
         forTokenCount tokenCount: Int,
         preference: ModelNames.TTS.Variant?,
         capacities: TokenCapacities
-    ) throws -> ModelNames.TTS.Variant {
+    ) async throws -> ModelNames.TTS.Variant {
         if let preference {
             let capacity = capacities.capacity(for: preference)
             guard tokenCount <= capacity else {
@@ -251,14 +251,15 @@ public struct KokoroSynthesizer {
                     "Chunk token count \(tokenCount) exceeds single-model capacity \(shortCapacity)"
                 )
             }
-            // Determine which variant this is based on capacity
-            if shortCapacity <= 71 {
-                return .fiveSecond
-            } else if shortCapacity <= 150 {
-                return .tenSecond
-            } else {
-                return .fifteenSecond
+            // Query the model cache to determine which variant is actually loaded
+            // instead of guessing based on capacity (which may not match expected values)
+            let cache = try currentModelCache()
+            let loadedVariants = await cache.getLoadedVariants()
+            guard let variant = loadedVariants.first else {
+                throw TTSError.processingFailed("No models loaded in single-model mode")
             }
+            logger.info("Single-model mode: using loaded variant \(variantDescription(variant))")
+            return variant
         }
 
         // Multi-model mode: use duration-based routing
@@ -516,7 +517,7 @@ public struct KokoroSynthesizer {
             throw TTSError.processingFailed("No valid words found in text")
         }
 
-        let entries = try buildChunkEntries(
+        let entries = try await buildChunkEntries(
             from: chunks,
             vocabulary: vocabulary,
             preference: variantPreference,
