@@ -208,8 +208,30 @@ public struct KokoroSynthesizer {
             }
             return preference
         }
+
+        // Single-model mode: if short and long capacities are equal, we're using only one variant
+        // This happens when only one model is loaded (e.g., only kokoro_24_10s for ManiApp)
         let shortCapacity = capacities.short
         let longCapacity = capacities.long
+
+        if shortCapacity == longCapacity {
+            // Only one model loaded - use it for all chunks
+            guard tokenCount <= shortCapacity else {
+                throw TTSError.processingFailed(
+                    "Chunk token count \(tokenCount) exceeds single-model capacity \(shortCapacity)"
+                )
+            }
+            // Determine which variant this is based on capacity
+            if shortCapacity <= 71 {
+                return .fiveSecond
+            } else if shortCapacity <= 150 {
+                return .tenSecond
+            } else {
+                return .fifteenSecond
+            }
+        }
+
+        // Multi-model mode: use duration-based routing
         guard tokenCount <= longCapacity else {
             throw TTSError.processingFailed(
                 "Chunk token count \(tokenCount) exceeds supported capacities (short=\(shortCapacity), long=\(longCapacity))"

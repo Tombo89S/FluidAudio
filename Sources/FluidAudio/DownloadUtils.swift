@@ -237,7 +237,7 @@ public class DownloadUtils {
         let repoPath = directory.appendingPathComponent(repo.folderName)
         if !FileManager.default.fileExists(atPath: repoPath.path) {
             logger.info("Models not found in cache at \(repoPath.path)")
-            try await downloadRepo(repo, to: directory, variant: variant)
+            try await downloadRepo(repo, to: directory, variant: variant, modelNames: modelNames)
         } else {
             logger.info("Found \(repo.folderName) locally, no download needed")
         }
@@ -329,14 +329,19 @@ public class DownloadUtils {
     }
 
     /// Download a HuggingFace repository
-    private static func downloadRepo(_ repo: Repo, to directory: URL, variant: String? = nil) async throws {
+    private static func downloadRepo(
+        _ repo: Repo,
+        to directory: URL,
+        variant: String? = nil,
+        modelNames: [String]? = nil
+    ) async throws {
         logger.info("Downloading \(repo.folderName) from HuggingFace...")
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
-        // Get the required model names for this repo from the appropriate manager
-        let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
+        // Get the required model names: use explicit list if provided, otherwise get defaults
+        let requiredModels = modelNames.map { Set($0) } ?? ModelNames.getRequiredModelNames(for: repo, variant: variant)
 
         // Download all repository contents
         let files = try await listRepoFiles(repo)
