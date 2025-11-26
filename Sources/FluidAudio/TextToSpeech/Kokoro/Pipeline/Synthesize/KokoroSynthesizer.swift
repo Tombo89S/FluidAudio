@@ -173,6 +173,9 @@ public struct KokoroSynthesizer {
         case .fiveSecond?:
             let short = try await tokenLength(for: .fiveSecond)
             return TokenCapacities(short: short, long: short)
+        case .tenSecond?:
+            let medium = try await tokenLength(for: .tenSecond)
+            return TokenCapacities(short: medium, long: medium)
         case .fifteenSecond?:
             let long = try await tokenLength(for: .fifteenSecond)
             return TokenCapacities(short: long, long: long)

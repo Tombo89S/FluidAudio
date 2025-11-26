@@ -119,6 +119,8 @@ public actor KokoroModelCache {
         switch variant {
         case .fiveSecond:
             return "5s"
+        case .tenSecond:
+            return "10s"
         case .fifteenSecond:
             return "15s"
         }

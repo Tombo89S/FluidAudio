@@ -129,6 +129,7 @@ public enum ModelNames {
         /// Available Kokoro variants shipped with the library.
         public enum Variant: CaseIterable, Sendable {
             case fiveSecond
+            case tenSecond
             case fifteenSecond
 
             /// Underlying model bundle filename.
@@ -136,6 +137,8 @@ public enum ModelNames {
                 switch self {
                 case .fiveSecond:
                     return "kokoro_21_5s.mlmodelc"
+                case .tenSecond:
+                    return "kokoro_24_10s.mlmodelc"
                 case .fifteenSecond:
                     return "kokoro_21_15s.mlmodelc"
                 }
@@ -146,6 +149,8 @@ public enum ModelNames {
                 switch self {
                 case .fiveSecond:
                     return 5
+                case .tenSecond:
+                    return 10
                 case .fifteenSecond:
                     return 15
                 }

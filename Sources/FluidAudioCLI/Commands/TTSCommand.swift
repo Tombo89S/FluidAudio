@@ -17,6 +17,8 @@ public struct TTS {
         switch variant {
         case .fiveSecond:
             return "5s"
+        case .tenSecond:
+            return "10s"
         case .fifteenSecond:
             return "15s"
         }
@@ -377,6 +379,8 @@ public struct TTS {
                             switch chunk.variant {
                             case .fiveSecond:
                                 return "kokoro_24_5s_v2"
+                            case .tenSecond:
+                                return "kokoro_24_10s"
                             case .fifteenSecond:
                                 return "kokoro_24_15s"
                             }
@@ -708,6 +712,8 @@ extension TTS {
         switch variant {
         case .fiveSecond:
             return "5s"
+        case .tenSecond:
+            return "10s"
         case .fifteenSecond:
             return "15s"
         }

@@ -9,6 +9,8 @@ extension KokoroSynthesizer {
             switch variant {
             case .fiveSecond:
                 return short
+            case .tenSecond:
+                return long
             case .fifteenSecond:
                 return long
             }
