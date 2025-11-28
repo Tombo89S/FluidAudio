@@ -104,6 +104,7 @@ Resources/
 scripts/
 Documentation/parakeet-tdt/
 docs/parakeet-tdt/
+ManiDocs
 
 fluidaudio_cli/*
 .vscode/

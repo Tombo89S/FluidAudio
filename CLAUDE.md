@@ -6,6 +6,132 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 FluidAudio is a comprehensive Swift framework for local, low-latency audio processing on Apple platforms. It provides state-of-the-art speaker diarization, automatic speech recognition (ASR), and voice activity detection (VAD) through open-source models converted to Core ML. The system processes audio to identify "who spoke when" by segmenting audio and clustering speaker embeddings, with industry-competitive performance (17.7% DER).
 
+**⚠️ IMPORTANT: This is a Fork**
+
+This repository is a fork of the original FluidAudio project (`github.com/FluidInference/FluidAudio`), specifically customized for **ManiApp** with single-model TTS mode.
+
+**Fork Details:**
+- **Repository**: `github.com/Tombo89S/FluidAudio`
+- **Branch**: `fix/ios-filehandle-crash`
+- **Purpose**: Enable single-model Kokoro TTS using ONLY `kokoro_24_10s.mlmodelc` (~310MB) instead of all variants (~620MB)
+- **Status**: Phase 13J COMPLETE - Single-model mode fully working in production
+- **Backwards Compatibility**: All modifications preserve compatibility for other projects using this fork
+
+## Fork-Specific Modifications (Phase 13J - Single-Model TTS)
+
+### What Changed
+
+This fork implements **single-model mode** for Kokoro TTS, allowing applications to download and use only one variant instead of all three. This reduces initial download size by ~50% (from 620MB to 310MB).
+
+### Key Implementation Details
+
+**Four-iteration fix journey (commits):**
+1. **Fix v1 (f215e13)**: Made `DownloadUtils.downloadRepo()` respect explicit `modelNames` parameter
+2. **Fix v2 (832d38d)**: Prevented `tokenLength()` from auto-loading models
+3. **Fix v3 (1f25250)**: Prevented `loadModelsIfNeeded()` from auto-downloading when `variants=nil`
+4. **Fix v4 (3039342)**: **FINAL** - Query `modelCache` directly instead of guessing variant from capacity
+
+**Root cause solved in Fix v4:**
+- `kokoro_24_10s.mlmodelc` has an input shape of **242 tokens** (not 150 as expected)
+- Previous code guessed variant using hardcoded thresholds: `if capacity > 150` → `.fifteenSecond`
+- This caused incorrect variant selection even though only `.tenSecond` was loaded
+- **Solution**: Query `modelCache.getLoadedVariants()` directly instead of inferring from capacity
+
+### Modified Files in Fork
+
+1. **Sources/FluidAudio/ModelNames.swift**
+   - Added `.tenSecond` case to `TTS.Variant` enum
+   - Maps to `kokoro_24_10s.mlmodelc`
+   - Max duration: 10 seconds
+
+2. **Sources/FluidAudio/TextToSpeech/Kokoro/Pipeline/Preprocess/KokoroModelCache.swift**
+   - Added `getLoadedVariants()` method - Query which models are loaded without triggering downloads
+   - Modified `loadModelsIfNeeded()` to distinguish explicit vs implicit requests
+   - Modified `tokenLength()` to prevent auto-loading missing models
+
+3. **Sources/FluidAudio/TextToSpeech/Kokoro/Pipeline/Synthesize/KokoroSynthesizer.swift**
+   - Modified `selectVariant()` to query cache instead of guessing from capacity (Fix v4)
+   - Made `selectVariant()` async and propagated through call chain
+   - Enhanced `capacities()` with single-model detection
+   - Added logging for debugging variant selection
+
+4. **Sources/FluidAudio/TextToSpeech/DownloadUtils.swift**
+   - Added `modelNames` parameter to `downloadRepo()`
+   - Respects explicit model specification instead of downloading all variants
+
+### Usage Pattern (ManiApp)
+
+```swift
+// Download ONLY the 10-second variant (~310MB)
+let models = try await TtsModels.download(variants: [.tenSecond])
+try await ttsManager.initialize(models: models)
+
+// System automatically detects single-model mode
+// All chunks use kokoro_24_10s.mlmodelc
+// No additional downloads triggered
+```
+
+### Verification Logs (Success Indicators)
+
+```
+[INFO] Single-model mode detected: using 10s for all synthesis
+[INFO] selectVariant() called: tokenCount=183, short=242, long=242
+[INFO] Single-model mode: using loaded variant 10s
+[INFO] Chunk 1 using Kokoro 10s model
+[INFO] Chunk 2 using Kokoro 10s model
+✅ AudioEncoder: Successfully encoded to M4A
+```
+
+### Storage Savings
+
+| Configuration | Download Size | Models Included |
+|--------------|---------------|-----------------|
+| **All variants** (upstream) | ~620 MB | kokoro_21_5s, kokoro_24_10s, kokoro_21_15s |
+| **Single variant** (this fork) | ~310 MB | kokoro_24_10s only |
+| **Savings** | **~310 MB (50%)** | |
+
+### When to Use Single-Model vs Multi-Model
+
+**Use Single-Model Mode:**
+- ✅ Mobile apps with storage constraints
+- ✅ Short-to-medium content generation (most text fits in 10s chunks)
+- ✅ Faster initial setup desired
+
+**Use Multi-Model Mode:**
+- ❌ Very long content (>10s per chunk without splitting)
+- ❌ Desktop apps where storage isn't constrained
+- ❌ Need optimal quality for varying text lengths
+
+### Debugging Single-Model Issues
+
+If you see unwanted model downloads:
+
+1. **Check Initialization**
+   ```swift
+   // ✅ Correct
+   let models = try await TtsModels.download(variants: [.tenSecond])
+
+   // ❌ Wrong - downloads all
+   let models = try await TtsModels.download()
+   ```
+
+2. **Check Logs for Capacity Values**
+   ```
+   [INFO] selectVariant() called: tokenCount=X, short=Y, long=Z
+   ```
+   - If `short == long` → single-model mode ✅
+   - If `short != long` → multi-model mode detected ❌
+
+3. **Check Variant Selection**
+   - Should see "10s" consistently throughout ✅
+   - If you see "15s" or "5s" → selectVariant() issue ❌
+
+### Related Documentation
+
+- **Implementation Plan**: `ManiDocs/claude-kokoro-24-10s-implementation.md`
+- **Single-Model Spec**: `ManiDocs/phase-13j-single-model-implementation.md`
+- **TTS Model Spec**: `ManiDocs/maniapp_tts_model_and_download_spec_latest.md`
+
 ## Critical Development Rules
 
 ### ⚠️ NEVER USE "unchecked Sendable"
@@ -75,15 +201,52 @@ DiarizerConfig(
 
 ## Key Features
 
-### 1. Speaker Diarization
-- **Status**: Production ready with 17.7% DER
-- **Models**: CoreML-based speaker segmentation and embedding
-- **Auto-recovery**: Handles corrupted model downloads automatically
+### 1. Speaker Diarization (Dual Pipeline Architecture)
+
+**Streaming/Online Diarization** (`DiarizerManager`):
+- Real-time speaker tracking with consistent IDs across chunks
+- AHC (Agglomerative Hierarchical Clustering)
+- Use case: Real-time transcription with speaker labels
+- Performance: Fast, suitable for live processing
+
+**Offline Diarization** (`OfflineDiarizerManager`):
+- Batch processing with VBx clustering and PLDA transformation
+- Enhanced accuracy through advanced clustering
+- Use case: Post-processing complete recordings for best quality
+- Performance: 18-20% DER on AMI-SDM with threshold 0.6
+- Models: Powerset segmentation + WeSpeaker embeddings + VBx clustering
 
 ### 2. Auto-Recovery Mechanism
 - Automatic detection and recovery from CoreML compilation failures
 - Re-downloads corrupted models from Hugging Face
 - Up to 3 retry attempts with comprehensive logging
+
+### 3. Text-to-Speech (TTS) - Beta
+
+**⚠️ Fork-Specific: Single-Model Mode**
+- **Default Model**: `kokoro_24_10s.mlmodelc` (~310MB) - 10-second context window
+- **Download Size**: ~310 MB (vs ~620 MB for all variants in upstream)
+- **Status**: Beta - American English only, additional languages planned
+- **Performance**: ~25x RTF on M4 Pro, ~2s warm-up after initial 15s compilation
+- **Memory**: ~3.37 GB peak (MLX baseline), lower with CoreML
+- **Output**: 24 kHz mono WAV format
+- **G2P**: Dictionary-first, eSpeak NG fallback for OOV words
+
+**Requirements (macOS):**
+- eSpeak NG must be installed and discoverable via pkg-config
+- Install: `brew install espeak-ng`
+- Build with explicit paths if needed: `swift build -Xcc -I/opt/homebrew/include -Xlinker -L/opt/homebrew/lib`
+
+**Key CLI Commands:**
+```bash
+# Basic synthesis with auto-download
+swift run fluidaudio tts "Hello from FluidAudio." --auto-download --output out.wav
+
+# Benchmark TTS performance
+swift run fluidaudio tts --benchmark
+```
+
+**arm64-only Note**: Current TTS tooling ships arm64-only dependencies (ESpeakNG.xcframework)
 
 ## Essential Development Commands
 
@@ -125,6 +288,9 @@ swift format --configuration .swift-format Sources/ Tests/
 swift run fluidaudio diarization-benchmark --auto-download
 swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.7 --output results.json
 
+# Offline diarization (VBx pipeline)
+swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --threshold 0.6
+
 # ASR benchmarks
 swift run fluidaudio asr-benchmark --subset test-clean --max-files 100
 swift run fluidaudio asr-benchmark --subset test-other --output asr_results.json
@@ -134,6 +300,9 @@ swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
 
 # VAD benchmark
 swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.5
+
+# TTS benchmark
+swift run fluidaudio tts --benchmark
 ```
 
 #### Audio Processing
@@ -145,8 +314,15 @@ swift run fluidaudio transcribe audio.wav --low-latency
 # Multi-stream processing
 swift run fluidaudio multi-stream audio1.wav audio2.wav
 
-# Diarization processing
+# Diarization processing (streaming)
 swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
+
+# Diarization processing (offline/VBx)
+swift run fluidaudio process meeting.wav --mode offline --threshold 0.6 --debug
+
+# Text-to-speech
+swift run fluidaudio tts "Hello world" --output out.wav
+swift run fluidaudio tts "Your text" --auto-download --output speech.wav
 ```
 
 #### Dataset Management
@@ -188,9 +364,12 @@ FluidAudio/
 │   │   ├── ASR/             # Automatic Speech Recognition
 │   │   ├── Diarizer/        # Speaker diarization system
 │   │   ├── VAD/             # Voice Activity Detection
+│   │   ├── TextToSpeech/    # Kokoro TTS (fork-specific single-model mode)
 │   │   └── Shared/          # Common utilities (audio conversion, memory optimization)
+│   ├── FastClusterWrapper/  # C++ clustering library wrapper
 │   └── FluidAudioCLI/       # Command-line interface (macOS only)
 ├── Tests/                   # Comprehensive test suite
+├── ManiDocs/               # Fork-specific documentation (ManiApp integration)
 └── Datasets/               # Evaluation datasets (AMI corpus)
 ```
 
@@ -206,28 +385,57 @@ FluidAudio/
 - **Performance**: ~209.8x RTF on M4 Pro, 55.7% WER improvement with stateless approach
 
 #### 2. Diarization System
-- **DiarizerManager**: Main orchestrator for speaker separation
-- **SegmentationProcessor**: Voice activity detection and segmentation
-- **EmbeddingExtractor**: Speaker embedding generation for clustering
-- **SpeakerManager**: Consistent speaker ID tracking across chunks
-- **Performance**: 17.7% DER on AMI dataset (competitive with research)
+
+**Streaming/Online (`DiarizerManager`):**
+- Main orchestrator for real-time speaker separation
+- SegmentationProcessor: Voice activity detection and segmentation
+- EmbeddingExtractor: Speaker embedding generation for clustering
+- SpeakerManager: Consistent speaker ID tracking across chunks
+- Performance: Fast, suitable for live processing
+
+**Offline/Batch (`OfflineDiarizerManager`):**
+- VBx clustering with PLDA transformation
+- Powerset segmentation for enhanced accuracy
+- Performance: 18-20% DER on AMI-SDM (competitive with research)
 
 #### 3. Voice Activity Detection
-- **VadManager**: Voice activity detection with CoreML models
-- **VadAudioProcessor**: additional filtering process 
+- **VadManager**: Voice activity detection with Silero CoreML models (Beta)
+- **Streaming Support**: Real-time VAD with state management
+- **Segmentation**: High-level speech segment extraction API
 
-#### 4. Shared Infrastructure
+#### 4. Text-to-Speech (Beta - Fork-Specific)
+- **TtSManager**: Main synthesis orchestrator using Kokoro CoreML model
+- **KokoroSynthesizer**: Core synthesis engine with voice embedding management
+- **KokoroModelCache**: Model caching with single-model mode support
+- **LexiconAssetManager**: Dictionary-first G2P with eSpeak NG fallback
+- **Single-Model Mode**: Download only `kokoro_24_10s.mlmodelc` (~310MB)
+- **Voice Embeddings**: Cached in `~/.cache/fluidaudio/Models/kokoro`
+
+#### 5. Shared Infrastructure
 - **ANEMemoryOptimizer**: Apple Neural Engine memory management
 - **AudioConverter**: Universal audio format conversion to 16kHz mono Float32
 - **ModelDownloader**: Automatic model retrieval from HuggingFace with recovery
 - **Zero-Copy Processing**: Efficient model chaining without data duplication
+
+### Key Manager Classes
+
+| Manager | Purpose | Availability | Platform |
+|---------|---------|--------------|----------|
+| `AsrManager` | Batch transcription (Parakeet TDT) | Stable | macOS 14+, iOS 17+ |
+| `StreamingAsrManager` | Real-time transcription | Beta | macOS 14+, iOS 17+ |
+| `DiarizerManager` | Streaming speaker diarization | Stable | macOS 14+, iOS 17+ |
+| `OfflineDiarizerManager` | Batch speaker diarization (VBx) | Stable | macOS 14+, iOS 17+ |
+| `VadManager` | Voice activity detection (Silero) | Beta | macOS 14+, iOS 17+ |
+| `TtSManager` | Text-to-speech (Kokoro) | Beta (en-US only) | macOS 14+ (CLI macOS-only) |
+| `SpeakerManager` | Speaker tracking and embedding clustering | Internal | macOS 14+, iOS 17+ |
 
 ### Processing Pipeline
 1. **Audio Input** → AudioConverter (16kHz mono Float32)
 2. **VAD Processing** → Voice activity segments
 3. **Diarization** → Speaker embeddings + clustering
 4. **ASR Processing** → Speech-to-text transcription
-5. **Output** → Timestamped speaker-attributed transcripts
+5. **TTS Processing** → Text-to-speech audio generation
+6. **Output** → Timestamped speaker-attributed transcripts / Generated audio
 
 ### Threading and Concurrency
 - **Actor-based Architecture**: Thread-safe processing without `@unchecked Sendable`
@@ -241,6 +449,33 @@ FluidAudio/
 - **Auto-Recovery**: Corrupt model detection and re-download
 - **CoreML Compilation**: Optimized for Apple Neural Engine
 - **Caching**: Local model storage with validation
+- **Single-Model TTS** (fork-specific): Download only required Kokoro variant
+
+## Model Registry Configuration
+
+By default, models download from HuggingFace. Override for mirrors/air-gapped environments:
+
+**Programmatic override** (recommended for apps):
+```swift
+import FluidAudio
+ModelRegistry.baseURL = "https://your-mirror.example.com"
+let diarizer = DiarizerManager()
+```
+
+**Environment variables** (CLI/testing):
+```bash
+export REGISTRY_URL=https://your-mirror.example.com
+# or
+export MODEL_REGISTRY_URL=https://models.internal.corp
+
+swift run fluidaudio transcribe audio.wav
+```
+
+**Proxy configuration** (corporate firewalls):
+```bash
+export https_proxy=http://proxy.company.com:8080
+swift run fluidaudio transcribe audio.wav
+```
 
 ## Architecture Notes
 
@@ -250,30 +485,30 @@ FluidAudio/
 - **Quality Improvement**: Stateless approach eliminates context pollution, yielding 55.7% WER reduction
 - **Batch Processing**: Optimized for transcribing multiple files sequentially
 - **Online diarization**: Works well with chunk-based processing
+- **Offline diarization**: VBx clustering with PLDA for enhanced accuracy
 - **Speaker tracking**: Effective across chunks
 - **DER calculation**: Fixed with optimal speaker mapping (Hungarian algorithm)
+- **Single-Model TTS**: Token capacity detection instead of hardcoded thresholds
 - **Cross-platform**: Supports macOS 14.0+, iOS 17.0+ (library), CLI macOS-only
-
-## Streaming Diarization (Work in Progress)
-
-### Goal
-Develop a custom streaming speaker diarization manager that maintains consistent speaker IDs across chunks WITHOUT using the Hungarian algorithm for retroactive remapping (which is "cheating" in real-time scenarios).
 
 ## Development Environment
 
 ### Requirements
 - **Swift**: 5.10+ (Swift 6+ required for contributors using swift-format)
-- **Platforms**: macOS 14.0+, iOS 17.0+ 
+- **Platforms**: macOS 14.0+, iOS 17.0+
 - **Xcode**: Latest stable version for iOS development
 - **Hardware**: Apple Silicon recommended for optimal performance
+- **TTS (macOS)**: eSpeak NG required for phonemization
 
 ### CI/CD Pipeline
 The project uses GitHub Actions with the following workflows:
 - **swift-format.yml**: Code formatting compliance checks
 - **tests.yml**: Cross-platform build and test execution
 - **asr-benchmark.yml**: ASR performance validation
-- **diarizer-benchmark.yml**: Speaker diarization benchmarks
+- **diarizer-benchmark.yml**: Speaker diarization benchmarks (streaming)
+- **offline-pipeline.yml**: Offline VBx pipeline benchmarks
 - **vad-benchmark.yml**: Voice activity detection validation
+- **tts-test.yml**: TTS synthesis validation
 
 ### Code Style Configuration
 - **Swift Format**: Enforced via `.swift-format` config
@@ -303,12 +538,7 @@ The project uses GitHub Actions with the following workflows:
 8. **Testing Policy**: ONLY add or run tests when explicitly requested by the user
 9. **Git Operations**: NEVER run `git push` unless explicitly requested by the user. Only commit when asked.
 10. **Code Formatting**: All code must pass swift-format checks before merge
-
-## Next Steps
-
-1. **Multi-file validation**: Test optimal config on all AMI files
-2. **Real-world testing**: Validate on non-AMI audio
-3. **Documentation**: Update API documentation
+11. **Fork Awareness**: Remember this is a ManiApp-specific fork with single-model TTS modifications
 
 ## Testing Strategy
 
@@ -326,10 +556,12 @@ The project uses GitHub Actions with the following workflows:
 - **DiarizerMemoryTests**: Memory management validation
 - **SendableTests**: Thread safety compliance
 - **SegmentationProcessorTests**: Audio segmentation accuracy
+- **TTSManagerTests**: TTS synthesis validation (requires eSpeak NG)
+- **StreamingAsrManagerTests**: Streaming transcription tests
 
 ### Running Specific Tests
 ```bash
-# CI-specific tests (lightweight)
+# CI-specific tests (lightweight, no model downloads required)
 swift test --filter CITests
 
 # ASR component tests
@@ -338,13 +570,56 @@ swift test --filter AsrManagerTests
 # Memory optimization tests
 swift test --filter ANEMemoryOptimizerTests
 
+# TTS tests (requires eSpeak NG)
+swift test --filter TTSManagerTests
+
+# Streaming tests
+swift test --filter StreamingAsrManagerTests
+
 # Edge case validation
 swift test --filter EdgeCaseTests
+
+# Run a single test method
+swift test --filter CITests/testDiarizerCreation
 ```
 
 ## Model Sources
 
-- **Diarization**: [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
+- **Diarization (Streaming)**: [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
+- **Diarization (Offline)**: Community-1 pipeline (Powerset + WeSpeaker + VBx)
 - **VAD CoreML**: [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml)
 - **ASR Models**: [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
+- **TTS Model**: [FluidInference/kokoro-82m-coreml](https://huggingface.co/FluidInference/kokoro-82m-coreml) (fork uses `kokoro_24_10s` only)
 - **Test Data**: [alexwengg/musan_mini*](https://huggingface.co/datasets/alexwengg) variants
+
+## Fork-Specific Notes for Future Development
+
+### Switching TTS Variants (If Needed)
+
+To change ManiApp from `kokoro_24_10s` to a different variant:
+
+1. Update variant specification in ManiApp integration:
+   - `KokoroVoiceManager.swift` - Change `variants: [.tenSecond]` to desired variant
+   - `KokoroModel.swift` - Change `variants: [.tenSecond]` to match
+
+2. Update UI copy:
+   - `AIVoiceSetupView.swift` - Adjust download size/time estimates:
+     - `.fiveSecond`: ~310 MB, 3-4 min
+     - `.tenSecond`: ~310 MB, 3-4 min (current)
+     - `.fifteenSecond`: ~310 MB, 3-4 min
+
+3. No FluidAudio fork changes needed - the fork treats all variants equally
+
+### Critical Implementation Insights (Phase 13J)
+
+1. **Never guess - always query**: Instead of inferring model variant from capacity thresholds, query the actual loaded models via `modelCache.getLoadedVariants()`
+
+2. **Token capacities vary**: Model input shapes are not fixed at compile time. `kokoro_24_10s` has 242 tokens, not 150.
+
+3. **Explicit vs Implicit requests matter**: Distinguish between user-initiated (`variants: [.tenSecond]`) and system-initiated (`loadModelsIfNeeded(variants: nil)`) model loading
+
+4. **Single-model detection**: `shortCapacity == longCapacity` means one model loaded
+
+5. **Async propagation required**: Making `selectVariant()` async required propagating async/await through the call chain
+
+6. **Debug logging is essential**: The capacity mismatch (242 vs 150) was only discovered through detailed logging

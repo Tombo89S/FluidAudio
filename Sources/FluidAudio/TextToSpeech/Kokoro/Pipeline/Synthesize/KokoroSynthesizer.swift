@@ -202,7 +202,9 @@ public struct KokoroSynthesizer {
             // Only attempt if both models are actually loaded
             guard loadedVariants.contains(.fiveSecond) && loadedVariants.contains(.fifteenSecond) else {
                 // Partial multi-model setup - use whatever is available
-                logger.warning("Multi-model routing requested but not all models loaded: \(loadedVariants.map { variantDescription($0) }.joined(separator: ", ")). Using first available model for all chunks.")
+                logger.warning(
+                    "Multi-model routing requested but not all models loaded: \(loadedVariants.map { variantDescription($0) }.joined(separator: ", ")). Using first available model for all chunks."
+                )
                 let variant = loadedVariants.sorted(by: { $0.maxDurationSeconds < $1.maxDurationSeconds }).first!
                 let capacity = try await tokenLength(for: variant)
                 return TokenCapacities(short: capacity, long: capacity)

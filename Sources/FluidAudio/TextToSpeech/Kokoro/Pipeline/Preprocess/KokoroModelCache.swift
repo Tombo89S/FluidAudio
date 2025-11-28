@@ -34,7 +34,9 @@ public actor KokoroModelCache {
             // This prevents auto-downloading during synthesis when preference=nil
             guard explicitRequest else {
                 let available = downloadedModels.keys.map { variantDescription($0) }.sorted().joined(separator: ", ")
-                throw TTSError.modelNotFound("Requested variant not loaded. Available: [\(available)]. Requested: \(variantsNeedingDownload.map { variantDescription($0) }.joined(separator: ", "))")
+                throw TTSError.modelNotFound(
+                    "Requested variant not loaded. Available: [\(available)]. Requested: \(variantsNeedingDownload.map { variantDescription($0) }.joined(separator: ", "))"
+                )
             }
             let newlyDownloaded = try await TtsModels.download(variants: Set(variantsNeedingDownload))
             for (variant, model) in newlyDownloaded.modelsByVariant {
@@ -78,7 +80,9 @@ public actor KokoroModelCache {
         }
         // Check if model is already loaded before trying to load it
         guard let model = kokoroModels[variant] else {
-            throw TTSError.modelNotFound("Model \(variantDescription(variant)) not loaded. Available: \(kokoroModels.keys.map { variantDescription($0) }.joined(separator: ", "))")
+            throw TTSError.modelNotFound(
+                "Model \(variantDescription(variant)) not loaded. Available: \(kokoroModels.keys.map { variantDescription($0) }.joined(separator: ", "))"
+            )
         }
         let length = KokoroSynthesizer.inferTokenLength(from: model)
         tokenLengthCache[variant] = length
