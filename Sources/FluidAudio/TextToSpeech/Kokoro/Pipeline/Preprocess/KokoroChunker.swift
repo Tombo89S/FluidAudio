@@ -12,6 +12,8 @@ struct TextChunk: Sendable {
     let totalFrames: Float
     let pauseAfterMs: Int
     let text: String
+    let startWordIndex: Int
+    let endWordIndex: Int
 }
 
 /// Splits normalized input text into Kokoro-friendly segments: sentence tokenization,
@@ -21,6 +23,18 @@ enum KokoroChunker {
     private static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroChunker")
     private static let decimalDigits = CharacterSet.decimalDigits
     private static let apostropheCharacters: Set<Character> = ["'", "’", "ʼ", "‛", "‵", "′"]
+
+    static func canonicalizeInput(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return collapseNewlines(trimmed)
+    }
+
+    static func reconstructText(from chunks: [TextChunk]) -> String {
+        chunks.reduce(into: "") { combined, chunk in
+            combined = appendSegment(combined, with: chunk.text)
+        }
+    }
 
     private static func isWordCharacter(_ character: Character) -> Bool {
         if character.isLetter || character.isNumber || apostropheCharacters.contains(character) {
@@ -281,6 +295,7 @@ enum KokoroChunker {
         var chunkTokenCount = 0
         var needsWordSeparator = false
         var missing: Set<String> = []
+        var chunkStartWordIndex: Int? = nil
 
         func flushChunk() {
             guard !chunkPhonemes.isEmpty else { return }
@@ -288,6 +303,8 @@ enum KokoroChunker {
                 chunkPhonemes.removeLast()
                 chunkTokenCount -= 1
             }
+            let start = chunkStartWordIndex ?? wordIndex
+            let end = max(start, wordIndex)
             let textValue = chunkAtoms.reduce(into: "") { partial, atom in
                 partial = appendSegment(partial, with: atom)
             }.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -298,7 +315,9 @@ enum KokoroChunker {
                     phonemes: chunkPhonemes,
                     totalFrames: 0,
                     pauseAfterMs: 0,
-                    text: textValue
+                    text: textValue,
+                    startWordIndex: start,
+                    endWordIndex: end
                 )
             )
             chunkWords.removeAll(keepingCapacity: true)
@@ -306,6 +325,7 @@ enum KokoroChunker {
             chunkPhonemes.removeAll(keepingCapacity: true)
             chunkTokenCount = 0
             needsWordSeparator = false
+            chunkStartWordIndex = nil
         }
 
         for atom in atoms {
@@ -370,6 +390,10 @@ enum KokoroChunker {
                     tokenCost += 1
                 }
 
+                if chunkStartWordIndex == nil {
+                    chunkStartWordIndex = wordIndex
+                }
+
                 if chunkTokenCount + tokenCost > capacity && !chunkPhonemes.isEmpty {
                     flushChunk()
                 }
@@ -388,6 +412,9 @@ enum KokoroChunker {
 
             case .punctuation(let symbol):
                 guard allowed.contains(symbol) else { continue }
+                if chunkStartWordIndex == nil {
+                    chunkStartWordIndex = wordIndex
+                }
                 if chunkTokenCount + 1 > capacity && !chunkPhonemes.isEmpty {
                     flushChunk()
                 }

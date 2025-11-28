@@ -59,6 +59,51 @@ public struct KokoroSynthesizer {
     static var voiceEmbeddingVectors: [VoiceEmbeddingCacheKey: [Float]] = [:]
     static let voiceEmbeddingLock = NSLock()
 
+    private static func logChunkCoverage(
+        originalText: String,
+        chunks: [TextChunk]
+    ) {
+        guard !chunks.isEmpty else { return }
+        let normalizedInput = collapseWhitespace(
+            in: KokoroChunker.canonicalizeInput(originalText))
+        let reconstructed = collapseWhitespace(
+            in: KokoroChunker.reconstructText(from: chunks))
+
+        if normalizedInput == reconstructed {
+            logger.info(
+                "Chunk reconstruction matches normalized input (\(reconstructed.count) characters)"
+            )
+        } else {
+            logger.warning(
+                "Chunk reconstruction mismatch: normalized input length=\(normalizedInput.count), reconstructed length=\(reconstructed.count)"
+            )
+        }
+
+        var expectedStart = 0
+        for (index, chunk) in chunks.enumerated() {
+            let start = chunk.startWordIndex
+            let end = chunk.endWordIndex
+            if start != expectedStart {
+                logger.warning(
+                    "Chunk \(index) word range gap detected: expected start \(expectedStart), got \(start)"
+                )
+            }
+            let expectedWords = max(0, end - start)
+            if expectedWords != chunk.words.count {
+                logger.warning(
+                    "Chunk \(index) word count mismatch: range width \(expectedWords), chunk contains \(chunk.words.count) words"
+                )
+            }
+            expectedStart = end
+
+            let prefix = String(chunk.text.prefix(80))
+            let suffix = String(chunk.text.suffix(80))
+            logger.info(
+                "Chunk \(index) wordRange=[\(start), \(end)) words=\(chunk.words.count) prefix='\(prefix)' suffix='\(suffix)'"
+            )
+        }
+    }
+
     private static func chunkText(
         _ text: String,
         vocabulary: [String: Int32],
@@ -101,6 +146,11 @@ public struct KokoroSynthesizer {
                 capacities: capacities
             )
             let targetTokens = capacities.capacity(for: variant)
+            if inputIds.count > targetTokens {
+                logger.warning(
+                    "Chunk \(index) token count \(inputIds.count) exceeds targetTokens=\(targetTokens); trimming \(inputIds.count - targetTokens) token(s)"
+                )
+            }
             let template = ChunkInfoTemplate(
                 index: index,
                 text: chunk.text,
@@ -518,6 +568,7 @@ public struct KokoroSynthesizer {
         guard !chunks.isEmpty else {
             throw TTSError.processingFailed("No valid words found in text")
         }
+        logChunkCoverage(originalText: text, chunks: chunks)
 
         let entries = try await buildChunkEntries(
             from: chunks,
@@ -705,6 +756,14 @@ public struct KokoroSynthesizer {
                     allSamples.append(contentsOf: chunkSamples)
                 }
             }
+        }
+
+        let rawSampleTotal = chunkSampleBuffers.reduce(0) { $0 + $1.count }
+        if rawSampleTotal > 0 {
+            let overlapDelta = rawSampleTotal - allSamples.count
+            Self.logger.notice(
+                "Audio concatenation: combined samples=\(allSamples.count), raw sum=\(rawSampleTotal), overlap delta=\(overlapDelta)"
+            )
         }
 
         guard !allSamples.isEmpty else {
