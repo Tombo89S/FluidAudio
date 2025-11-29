@@ -385,17 +385,16 @@ enum KokoroChunker {
                     continue
                 }
 
-                var tokenCost = resolvedPhonemes.count
-                if needsWordSeparator {
-                    tokenCost += 1
+                let requiresSeparator = needsWordSeparator
+                var tokenCost = resolvedPhonemes.count + (requiresSeparator ? 1 : 0)
+
+                if chunkTokenCount + tokenCost > capacity && !chunkPhonemes.isEmpty {
+                    flushChunk()
+                    tokenCost = resolvedPhonemes.count
                 }
 
                 if chunkStartWordIndex == nil {
                     chunkStartWordIndex = wordIndex
-                }
-
-                if chunkTokenCount + tokenCost > capacity && !chunkPhonemes.isEmpty {
-                    flushChunk()
                 }
 
                 if needsWordSeparator {
