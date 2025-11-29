@@ -411,11 +411,11 @@ enum KokoroChunker {
 
             case .punctuation(let symbol):
                 guard allowed.contains(symbol) else { continue }
-                if chunkStartWordIndex == nil {
-                    chunkStartWordIndex = wordIndex
-                }
                 if chunkTokenCount + 1 > capacity && !chunkPhonemes.isEmpty {
                     flushChunk()
+                }
+                if chunkStartWordIndex == nil {
+                    chunkStartWordIndex = wordIndex
                 }
                 chunkPhonemes.append(symbol)
                 chunkTokenCount += 1
