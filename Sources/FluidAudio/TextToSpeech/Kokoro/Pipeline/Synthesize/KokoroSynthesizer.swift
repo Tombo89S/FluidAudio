@@ -154,7 +154,8 @@ public struct KokoroSynthesizer {
         from chunks: [TextChunk],
         vocabulary: [String: Int32],
         preference: ModelNames.TTS.Variant?,
-        capacities: TokenCapacities
+        capacities: TokenCapacities,
+        targetTokenBudget: Int
     ) async throws -> [ChunkEntry] {
         var entries: [ChunkEntry] = []
         entries.reserveCapacity(chunks.count)
@@ -171,10 +172,15 @@ public struct KokoroSynthesizer {
                 preference: preference,
                 capacities: capacities
             )
-            let targetTokens = capacities.capacity(for: variant)
+            let targetTokens = min(targetTokenBudget, capacities.capacity(for: variant))
             if inputIds.count > targetTokens {
                 logger.warning(
                     "Chunk \(index) token count \(inputIds.count) exceeds targetTokens=\(targetTokens); trimming \(inputIds.count - targetTokens) token(s)"
+                )
+            }
+            if inputIds.count < targetTokens {
+                logger.info(
+                    "Chunk \(index) tokens=\(inputIds.count), targetTokens=\(targetTokens) (budgeted below model max)"
                 )
             }
             let template = ChunkInfoTemplate(
@@ -606,7 +612,8 @@ public struct KokoroSynthesizer {
             from: chunks,
             vocabulary: vocabulary,
             preference: variantPreference,
-            capacities: capacities
+            capacities: capacities,
+            targetTokenBudget: chunkTokenBudget
         )
 
         struct ChunkSynthesisResult: Sendable {
