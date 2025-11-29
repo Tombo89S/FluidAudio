@@ -59,6 +59,32 @@ public struct KokoroSynthesizer {
     static var voiceEmbeddingVectors: [VoiceEmbeddingCacheKey: [Float]] = [:]
     static let voiceEmbeddingLock = NSLock()
 
+    private static func conservativeTokenBudget(
+        capacities: TokenCapacities,
+        preference: ModelNames.TTS.Variant?,
+        loadedVariants: [ModelNames.TTS.Variant]
+    ) -> Int {
+        let singleModelVariant: ModelNames.TTS.Variant? = {
+            if let preference {
+                return preference
+            }
+            if loadedVariants.count == 1 {
+                return loadedVariants.first
+            }
+            return nil
+        }()
+
+        if capacities.short == capacities.long, singleModelVariant == .tenSecond {
+            let adjusted = max(1, Int(Double(capacities.long) * 0.8))
+            logger.info(
+                "Applying conservative token budget for 10s variant: \(adjusted) (from \(capacities.long))"
+            )
+            return adjusted
+        }
+
+        return capacities.long
+    }
+
     private static func logChunkCoverage(
         originalText: String,
         chunks: [TextChunk]
@@ -557,12 +583,18 @@ public struct KokoroSynthesizer {
         let modelCache = try currentModelCache()
         let vocabulary = try await KokoroVocabulary.shared.getVocabulary()
         let capacities = try await capacities(for: variantPreference)
+        let loadedVariants = await modelCache.getLoadedVariants()
+        let chunkTokenBudget = conservativeTokenBudget(
+            capacities: capacities,
+            preference: variantPreference,
+            loadedVariants: loadedVariants
+        )
         let lexiconMetrics = await lexiconCache.metrics()
 
         let chunks = try await chunkText(
             text,
             vocabulary: vocabulary,
-            longVariantTokenBudget: capacities.long,
+            longVariantTokenBudget: chunkTokenBudget,
             phoneticOverrides: phoneticOverrides
         )
         guard !chunks.isEmpty else {
