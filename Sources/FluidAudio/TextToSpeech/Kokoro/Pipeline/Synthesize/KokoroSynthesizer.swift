@@ -172,17 +172,24 @@ public struct KokoroSynthesizer {
                 preference: preference,
                 capacities: capacities
             )
-            let targetTokens = min(targetTokenBudget, capacities.capacity(for: variant))
-            if inputIds.count > targetTokens {
+            let targetTokens = capacities.capacity(for: variant)
+            let fillLimit = min(targetTokenBudget, targetTokens)
+            let clampedIds: [Int32]
+            if inputIds.count > fillLimit {
                 logger.warning(
-                    "Chunk \(index) token count \(inputIds.count) exceeds targetTokens=\(targetTokens); trimming \(inputIds.count - targetTokens) token(s)"
+                    "Chunk \(index) token count \(inputIds.count) exceeds budgeted fill limit \(fillLimit); trimming \(inputIds.count - fillLimit) token(s)"
                 )
+                clampedIds = Array(inputIds.prefix(fillLimit))
+            } else {
+                clampedIds = inputIds
             }
-            if inputIds.count < targetTokens {
+
+            if fillLimit < targetTokens {
                 logger.info(
-                    "Chunk \(index) tokens=\(inputIds.count), targetTokens=\(targetTokens) (budgeted below model max)"
+                    "Chunk \(index) tokens=\(clampedIds.count), capacity=\(targetTokens), budget=\(fillLimit) (padding to model capacity)"
                 )
             }
+
             let template = ChunkInfoTemplate(
                 index: index,
                 text: chunk.text,
@@ -190,11 +197,11 @@ public struct KokoroSynthesizer {
                 words: chunk.words,
                 atoms: chunk.atoms,
                 pauseAfterMs: chunk.pauseAfterMs,
-                tokenCount: min(inputIds.count, targetTokens),
+                tokenCount: min(clampedIds.count, fillLimit),
                 variant: variant,
                 targetTokens: targetTokens
             )
-            entries.append(ChunkEntry(chunk: chunk, inputIds: inputIds, template: template))
+            entries.append(ChunkEntry(chunk: chunk, inputIds: clampedIds, template: template))
         }
 
         if entries.count == 1 {
