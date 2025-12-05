@@ -427,11 +427,11 @@ public struct TTS {
     private static func printUsage() {
         print(
             """
-            Usage: fluidaudio tts "text" [--output file.wav] [--voice af_heart] [--metrics metrics.json]
+            Usage: fluidaudio tts "text" [--output file.wav] [--voice \(TtsConstants.recommendedVoice)] [--metrics metrics.json]
 
             Options:
               --output, -o         Output WAV path (default: output.wav)
-              --voice, -v          Voice name (default: af_heart)
+              --voice, -v          Voice name (default: \(TtsConstants.recommendedVoice))
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)
               --metrics            Write timing metrics to a JSON file (also runs ASR for evaluation)

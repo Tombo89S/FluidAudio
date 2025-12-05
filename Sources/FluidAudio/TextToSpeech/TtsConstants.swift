@@ -9,7 +9,7 @@ public enum TtsConstants {
 
     /// Voice identifier we regression-test and ship by default.
     /// This is the recommended American English voice for production use.
-    public static let recommendedVoice = "af_heart"
+    public static let recommendedVoice = "af_nicole"
 
     /// Canonical voice identifiers bundled with the Kokoro CoreML release.
     ///
